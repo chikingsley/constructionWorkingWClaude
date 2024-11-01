@@ -2,7 +2,7 @@
 
 import { memo } from 'react'
 import { Handle, Position } from 'reactflow'
-import { FileText, HardHat, Scale, Calculator } from 'lucide-react'
+import { FileText, HardHat, Scale, Calculator, Network, Database } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
 
@@ -11,6 +11,8 @@ const agentIcons = {
   technical: HardHat,
   compliance: Scale,
   cost: Calculator,
+  orchestration: Network,
+  resource: Database
 }
 
 interface AgentNodeProps {

@@ -1,10 +1,11 @@
 export interface AgentNode {
   id: string
-  type: 'document' | 'technical' | 'compliance' | 'cost'
-  status: 'idle' | 'processing' | 'complete' | 'error'
+  type: 'agent'
   data: {
     name: string
     description: string
+    type: 'document' | 'technical' | 'compliance' | 'cost' | 'orchestration' | 'resource'
+    status: 'idle' | 'processing' | 'complete' | 'error'
     currentTask?: string
     progress?: number
     error?: string
@@ -18,8 +19,8 @@ export interface AgentEdge {
   target: string
   type?: string
   animated?: boolean
-  data?: {
+  data: {
     type: 'data' | 'control'
-    status?: 'active' | 'inactive'
+    status: 'active' | 'inactive'
   }
 }
