@@ -1,62 +1,110 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
-import { Send } from 'lucide-react'
-import { useChatStore } from '@/lib/stores/chat';
-import { useStore as useAgentStore } from '@/lib/stores/agents';
+import { Textarea } from '@/components/ui/textarea'
+import { useChatStore } from '@/lib/stores/chat'
+import { AlertCircle } from 'lucide-react'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 
 export function MessageInput() {
-  const [message, setMessage] = useState('')
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const sendMessage = useChatStore((state) => state.sendMessage)
-  const { startProcessing } = useAgentStore()
+  const [input, setInput] = useState('')
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const {
+    isTyping,
+    activeAgents,
+    error,
+    addMessage,
+    setTyping,
+    setError
+  } = useChatStore()
 
-  const handleSubmit = () => {
-    if (!message.trim()) return
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.focus()
+    }
+  }, [])
 
-    // Start agent processing and send message
-    startProcessing()
-    sendMessage(message.trim())
-    setMessage('')
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!input.trim() || isTyping) return
+
+    const message = input.trim()
+    setInput('')
+    setTyping(true)
+    setError(null)
+
+    try {
+      if (window.socket?.readyState === WebSocket.OPEN) {
+        window.socket.send(JSON.stringify({
+          type: 'message',
+          data: {
+            content: message,
+            source: 'frontend'
+          }
+        }))
+        addMessage({
+          content: message,
+          role: 'user'
+        })
+      } else {
+        throw new Error('WebSocket is not connected')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send message')
+      setTyping(false)
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      handleSubmit()
+      handleSubmit(e)
     }
   }
 
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
-      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
-    }
-  }, [message])
-
   return (
-    <div className="border-t p-4">
-      <div className="flex gap-2">
+    <div className="p-4 space-y-4">
+      {error && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      
+      <form onSubmit={handleSubmit} className="flex gap-2 items-end">
         <Textarea
-          ref={textareaRef}
-          placeholder="Type your message..."
-          className="min-h-[60px] max-h-[200px] resize-none"
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
+          ref={inputRef}
+          tabIndex={0}
+          rows={1}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
+          placeholder={isTyping ? "Waiting for response..." : "Send a message..."}
+          spellCheck={false}
+          className="min-h-[60px] w-full resize-none bg-background px-3 py-2"
+          disabled={isTyping}
         />
-        <Button
-          size="icon"
-          className="h-[60px] w-[60px]"
-          onClick={handleSubmit}
-          disabled={!message.trim()}
+        <Button 
+          type="submit" 
+          disabled={!input.trim() || isTyping}
+          className="w-24"
         >
-          <Send className="h-5 w-5" />
-          <span className="sr-only">Send message</span>
+          {isTyping ? (
+            <div className="flex items-center gap-2">
+              <span className="animate-pulse">•••</span>
+            </div>
+          ) : (
+            'Send'
+          )}
         </Button>
-      </div>
+      </form>
+      
+      {activeAgents.size > 0 && (
+        <div className="text-sm text-muted-foreground">
+          Active agents: {Array.from(activeAgents).join(', ')}
+        </div>
+      )}
     </div>
   )
 }

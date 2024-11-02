@@ -8,14 +8,16 @@ interface AgentsState {
   isProcessing: boolean
   currentStep: number
   socket: WebSocket | null
+  errors: Record<string, string | null>
   setNodes: (nodes: Node<AgentNode['data']>[] | ((prev: Node<AgentNode['data']>[]) => Node<AgentNode['data']>[])) => void
   setEdges: (edges: Edge<AgentEdge['data']>[] | ((prev: Edge<AgentEdge['data']>[]) => Edge<AgentEdge['data']>[])) => void
-  startProcessing: () => void
+  startProcessing: () => Promise<void>
   stopProcessing: () => void
   resetNodes: () => void
-  connectWebSocket: () => void
+  connectWebSocket: () => Promise<void>
   disconnectWebSocket: () => void
   sendMessage: (message: string, sourceAgent: string, targetAgent: string) => void
+  setAgentError: (agentId: string, error: string | null) => void
 }
 
 const initialNodes: Node<AgentNode['data']>[] = [
@@ -173,6 +175,7 @@ export const useStore = create<AgentsState>((set, get) => ({
   isProcessing: false,
   currentStep: 0,
   socket: null,
+  errors: {},
 
   setNodes: (nodes) => set((state) => ({ 
     nodes: typeof nodes === 'function' ? nodes(state.nodes) : nodes 
@@ -183,106 +186,136 @@ export const useStore = create<AgentsState>((set, get) => ({
   })),
 
   connectWebSocket: () => {
-    const socket = new WebSocket('ws://localhost:8000/ws/frontend')
-    
-    socket.onopen = () => {
-        console.log('WebSocket connected')
-        set({ isProcessing: true })
-    }
-    
-    socket.onmessage = (event) => {
-        console.log('Received message:', event.data)
-        const data = JSON.parse(event.data)
-        
-        // Handle progress updates
-        if (data.type === 'progress') {
-            set((state) => ({
+    return new Promise<void>((resolve, reject) => {
+      const socket = new WebSocket('ws://localhost:8000/ws/frontend')
+      
+      socket.onopen = () => {
+          console.log('WebSocket connected')
+          set({ isProcessing: true })
+          resolve()
+      }
+      
+      socket.onmessage = (event) => {
+          console.log('Received message:', event.data)
+          const data = JSON.parse(event.data)
+          
+          // Handle progress updates
+          if (data.type === 'progress') {
+              set((state) => ({
+                  nodes: state.nodes.map((node) => {
+                      if (node.id === data.target) {
+                          return {
+                              ...node,
+                              data: {
+                                  ...node.data,
+                                  status: 'processing',
+                                  progress: data.data.progress,
+                                  currentTask: data.data.message
+                              }
+                          }
+                      }
+                      return node
+                  }),
+                  edges: state.edges.map((edge) => {
+                      if (edge.source === data.source && edge.target === data.target) {
+                          return {
+                              ...edge,
+                              animated: true,
+                              data: { type: edge.data?.type || 'data', status: 'active' }
+                          }
+                      }
+                      return edge
+                  })
+              }))
+          }
+          
+          // Handle responses
+          if (data.type === 'response') {
+              // Import dynamically to avoid circular dependency
+              import('./chat').then(({ useChatStore }) => {
+                  useChatStore.getState().addMessage({
+                      role: 'assistant',
+                      content: data.data.message
+                  })
+                  useChatStore.getState().setTyping(false)
+              })
+
+              // Update node status if complete
+              if (data.data.status === 'complete') {
+                  set((state) => ({
+                      nodes: state.nodes.map((node) => ({
+                          ...node,
+                          data: {
+                              ...node.data,
+                              status: 'complete',
+                              progress: 100
+                          }
+                      }))
+                  }))
+              }
+
+              // Update source and target nodes
+              set((state) => ({
                 nodes: state.nodes.map((node) => {
-                    if (node.id === data.target) {
-                        return {
-                            ...node,
-                            data: {
-                                ...node.data,
-                                status: 'processing',
-                                progress: data.data.progress,
-                                currentTask: data.data.message
-                            }
-                        }
+                  if (node.id === data.source || node.id === data.target) {
+                    return {
+                      ...node,
+                      data: {
+                        ...node.data,
+                        status: data.data.status || 'idle'
+                      }
                     }
-                    return node
-                }),
-                edges: state.edges.map((edge) => {
-                    if (edge.source === data.source && edge.target === data.target) {
-                        return {
-                            ...edge,
-                            animated: true,
-                            data: { type: edge.data?.type || 'data', status: 'active' }
-                        }
-                    }
-                    return edge
+                  }
+                  return node
                 })
-            }))
-        }
-        
-        // Handle responses
-        if (data.type === 'response') {
-            // Import dynamically to avoid circular dependency
-            import('./chat').then(({ useChatStore }) => {
+              }))
+          }
+
+          // Handle errors
+          if (data.type === 'error') {
+              console.error('Error from backend:', data.data.message)
+              
+              // Import chat store to show error message
+              import('./chat').then(({ useChatStore }) => {
                 useChatStore.getState().addMessage({
-                    role: 'assistant',
-                    content: data.data.message
+                  role: 'system',
+                  content: `Error: ${data.data.message}`
                 })
                 useChatStore.getState().setTyping(false)
-            })
+              })
 
-            // Update node status
-            if (data.data.status === 'complete') {
-                set((state) => ({
-                    nodes: state.nodes.map((node) => ({
-                        ...node,
-                        data: {
-                            ...node.data,
-                            status: 'complete',
-                            progress: 100
-                        }
-                    }))
-                }))
-            }
-        }
+              set((state) => ({
+                  nodes: state.nodes.map((node) => ({
+                      ...node,
+                      data: {
+                          ...node.data,
+                          status: 'error',
+                          error: data.data.message
+                      }
+                  }))
+              }))
+          }
+      }
+      
+      socket.onerror = (error) => {
+          console.error('WebSocket error:', error)
+          reject(error)
+      }
 
-        // Handle errors
-        if (data.type === 'error') {
-            console.error('Error from backend:', data.data.message)
-            set((state) => ({
-                nodes: state.nodes.map((node) => ({
-                    ...node,
-                    data: {
-                        ...node.data,
-                        status: 'error',
-                        error: data.data.message
-                    }
-                }))
-            }))
-        }
-    }
-    
-    socket.onerror = (error) => {
-        console.error('WebSocket error:', error)
-    }
+      socket.onclose = () => {
+          console.log('WebSocket disconnected')
+          set({ isProcessing: false })
+          // Attempt to reconnect after 2 seconds
+          setTimeout(() => {
+              if (get().isProcessing) {
+                  console.log('Attempting to reconnect...')
+                  get().connectWebSocket()
+              }
+          }, 2000)
+      }
 
-    socket.onclose = () => {
-        console.log('WebSocket disconnected')
-        set({ isProcessing: false })
-        // Attempt to reconnect after 2 seconds
-        setTimeout(() => {
-            if (get().isProcessing) {
-                console.log('Attempting to reconnect...')
-                get().connectWebSocket()
-            }
-        }, 2000)
-    }
-
-    set({ socket })
+      set({ socket })
+    })
   },
 
   disconnectWebSocket: () => {
@@ -296,18 +329,36 @@ export const useStore = create<AgentsState>((set, get) => ({
   sendMessage: (message: string, sourceAgent: string, targetAgent: string) => {
     const { socket } = get()
     if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({
-        message,
-        source_agent: sourceAgent,
-        target_agent: targetAgent
-      }))
+      try {
+        socket.send(JSON.stringify({
+          message,
+          source_agent: sourceAgent,
+          target_agent: targetAgent
+        }))
+      } catch (error) {
+        console.error('Error sending message:', error)
+        import('./chat').then(({ useChatStore }) => {
+          useChatStore.getState().addMessage({
+            role: 'system',
+            content: 'Error sending message. Please try again.'
+          })
+        })
+      }
+    } else {
+      console.error('WebSocket is not connected')
+      import('./chat').then(({ useChatStore }) => {
+        useChatStore.getState().addMessage({
+          role: 'system', 
+          content: 'Not connected to server. Please try again.'
+        })
+      })
     }
   },
 
-  startProcessing: () => {
+  startProcessing: async () => {
     set({ isProcessing: true, currentStep: 0 })
     const { connectWebSocket, sendMessage } = get()
-    connectWebSocket()
+    await connectWebSocket()
     // Start the process by sending initial message to orchestration agent
     sendMessage(
       "Start construction project planning",
@@ -366,4 +417,21 @@ export const useStore = create<AgentsState>((set, get) => ({
       })),
     }))
   },
+
+  setAgentError: (agentId, error) => 
+    set((state) => ({
+      errors: {
+        ...state.errors,
+        [agentId]: error ? humanizeError(error) : null
+      }
+    })),
 }))
+
+// Helper to make errors more user-friendly
+function humanizeError(error: string): string {
+  if (error.includes('max_prompt_tokens')) {
+    return "The request was too long. Please try breaking it into smaller parts."
+  }
+  // Add more error translations as needed
+  return "There was an issue processing your request. Please try again."
+}
