@@ -1,3 +1,0 @@
-agency-swarm
-python-dotenv
-pydantic

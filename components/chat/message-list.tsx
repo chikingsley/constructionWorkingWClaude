@@ -1,12 +1,12 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
-import { useStore } from '@/lib/stores/chat'
+import { useChatStore } from '@/lib/stores/chat';
 import { ChatMessage } from './message'
 import { ScrollArea } from '@/components/ui/scroll-area'
 
 export function MessageList() {
-  const messages = useStore((state) => state.messages)
+  const messages = useChatStore((state) => state.messages)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {

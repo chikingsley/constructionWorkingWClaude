@@ -4,42 +4,21 @@ import { useState, useRef, useEffect } from 'react'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { Send } from 'lucide-react'
-import { useStore as useChatStore } from '@/lib/stores/chat'
-import { useStore as useAgentStore } from '@/lib/stores/agents'
+import { useChatStore } from '@/lib/stores/chat';
+import { useStore as useAgentStore } from '@/lib/stores/agents';
 
 export function MessageInput() {
   const [message, setMessage] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const addMessage = useChatStore((state) => state.addMessage)
-  const simulateAgentResponse = useChatStore((state) => state.simulateAgentResponse)
+  const sendMessage = useChatStore((state) => state.sendMessage)
   const { startProcessing } = useAgentStore()
 
   const handleSubmit = () => {
     if (!message.trim()) return
 
-    // Add user message
-    addMessage({
-      role: 'user',
-      content: message.trim(),
-    })
-
-    // Start agent processing
+    // Start agent processing and send message
     startProcessing()
-
-    // Simulate agent responses in sequence
-    const agents = ['document-agent', 'technical-agent', 'compliance-agent', 'cost-agent']
-    agents.forEach((agentId, index) => {
-      // Initial response
-      setTimeout(() => {
-        simulateAgentResponse(agentId, 0)
-      }, index * 4000)
-
-      // Final response with results
-      setTimeout(() => {
-        simulateAgentResponse(agentId, 1)
-      }, index * 4000 + 2000)
-    })
-
+    sendMessage(message.trim())
     setMessage('')
   }
 

@@ -185,57 +185,101 @@ export const useStore = create<AgentsState>((set, get) => ({
   connectWebSocket: () => {
     const socket = new WebSocket('ws://localhost:8000/ws/frontend')
     
+    socket.onopen = () => {
+        console.log('WebSocket connected')
+        set({ isProcessing: true })
+    }
+    
     socket.onmessage = (event) => {
-      const data = JSON.parse(event.data)
-      
-      // Update node status based on agent activity
-      set((state) => ({
-        nodes: state.nodes.map((node) => {
-          if (node.id === data.target) {
-            return {
-              ...node,
-              data: {
-                ...node.data,
-                status: 'processing',
-                currentTask: data.data.message || data.data,
-                progress: data.data.progress || 0,
-              },
-            }
-          }
-          return node
-        }),
-        edges: state.edges.map((edge) => {
-          if (edge.source === data.source && edge.target === data.target) {
-            const currentType = edge.data?.type || 'data'
-            return {
-              ...edge,
-              animated: true,
-              data: { type: currentType, status: 'active' },
-            }
-          }
-          return edge
-        }),
-      }))
+        console.log('Received message:', event.data)
+        const data = JSON.parse(event.data)
+        
+        // Handle progress updates
+        if (data.type === 'progress') {
+            set((state) => ({
+                nodes: state.nodes.map((node) => {
+                    if (node.id === data.target) {
+                        return {
+                            ...node,
+                            data: {
+                                ...node.data,
+                                status: 'processing',
+                                progress: data.data.progress,
+                                currentTask: data.data.message
+                            }
+                        }
+                    }
+                    return node
+                }),
+                edges: state.edges.map((edge) => {
+                    if (edge.source === data.source && edge.target === data.target) {
+                        return {
+                            ...edge,
+                            animated: true,
+                            data: { type: edge.data?.type || 'data', status: 'active' }
+                        }
+                    }
+                    return edge
+                })
+            }))
+        }
+        
+        // Handle responses
+        if (data.type === 'response') {
+            // Import dynamically to avoid circular dependency
+            import('./chat').then(({ useChatStore }) => {
+                useChatStore.getState().addMessage({
+                    role: 'assistant',
+                    content: data.data.message
+                })
+                useChatStore.getState().setTyping(false)
+            })
 
-      // If the agent completed its task
-      if (data.data.status === 'complete') {
-        set((state) => ({
-          nodes: state.nodes.map((node) => {
-            if (node.id === data.target) {
-              return {
-                ...node,
-                data: {
-                  ...node.data,
-                  status: 'complete',
-                  currentTask: undefined,
-                  progress: undefined,
-                },
-              }
+            // Update node status
+            if (data.data.status === 'complete') {
+                set((state) => ({
+                    nodes: state.nodes.map((node) => ({
+                        ...node,
+                        data: {
+                            ...node.data,
+                            status: 'complete',
+                            progress: 100
+                        }
+                    }))
+                }))
             }
-            return node
-          }),
-        }))
-      }
+        }
+
+        // Handle errors
+        if (data.type === 'error') {
+            console.error('Error from backend:', data.data.message)
+            set((state) => ({
+                nodes: state.nodes.map((node) => ({
+                    ...node,
+                    data: {
+                        ...node.data,
+                        status: 'error',
+                        error: data.data.message
+                    }
+                }))
+            }))
+        }
+    }
+    
+    socket.onerror = (error) => {
+        console.error('WebSocket error:', error)
+    }
+
+    socket.onclose = () => {
+        console.log('WebSocket disconnected')
+        set({ isProcessing: false })
+        // Attempt to reconnect after 2 seconds
+        setTimeout(() => {
+            if (get().isProcessing) {
+                console.log('Attempting to reconnect...')
+                get().connectWebSocket()
+            }
+        }, 2000)
     }
 
     set({ socket })
